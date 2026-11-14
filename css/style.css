@@ -434,3 +434,10 @@ form.promo-row .btn{width:auto}
 .prod-file{word-break:normal;overflow-wrap:anywhere}
 main#app{padding-top:var(--nav-h,70px)}
 @media (max-width:480px){.logo{font-size:1.02rem}}
+
+/* Téléchargement : confirmation sur la page, bouton admin */
+.toast{position:fixed;left:50%;bottom:24px;transform:translate(-50%,20px);max-width:92vw;background:rgba(10,15,26,.96);border:1px solid var(--gold);color:var(--text);padding:.8rem 1.2rem;border-radius:12px;font-size:.9rem;z-index:10000;opacity:0;pointer-events:none;transition:opacity .25s,transform .25s;box-shadow:0 10px 30px rgba(0,0,0,.5)}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+.toast.toast-err{border-color:var(--err);color:var(--err)}
+.admin-dl{width:100%;margin-top:.5rem;border-style:dashed;color:var(--gold)}
+@media (prefers-reduced-motion:reduce){.toast{transition:none}}

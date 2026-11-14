@@ -19,9 +19,10 @@ const slug = s => String(s).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^
 const store = { get: k => { try { return sessionStorage.getItem(k) || ""; } catch (e) { return ""; } }, set: (k, v) => { try { sessionStorage.setItem(k, v); } catch (e) {} } };
 
 let user = null;
+let isAdmin = false;               // affichage seulement : le serveur revérifie le claim admin à chaque téléchargement
 let payTimer = null;
 let shopTimer = null;
-let catalog = { products: [], promo: null, drive: "unknown", loaded: false, error: null };
+let catalog = { products: [], promo: null, storage: "unknown", loaded: false, error: null };
 
 // ---------- API (avec jeton Firebase) ----------
 async function api(path, opts = {}) {
@@ -57,12 +58,12 @@ function openModal(inner, label) {
   return { el: m, close };
 }
 
-// ---------- Catalogue (Google Drive → backend → ici) ----------
+// ---------- Catalogue (stockage privé → serveur → ici) ----------
 let catalogLoading = null;
 function fetchCatalog() {
   if (catalogLoading) return catalogLoading;
   catalogLoading = api("/api/catalog")
-    .then(d => { catalog = { products: d.products || [], promo: d.promo || null, myPromo: d.my_promo || null, drive: d.drive, loaded: true, error: null, at: Date.now(), version: d.version }; })
+    .then(d => { catalog = { products: d.products || [], promo: d.promo || null, myPromo: d.my_promo || null, storage: d.storage, loaded: true, error: null, at: Date.now(), version: d.version }; })
     .catch(e => { catalog = { ...catalog, loaded: true, error: e.message || "Catalogue indisponible." }; })
     .finally(() => { catalogLoading = null; onCatalogChange(); });
   return catalogLoading;
@@ -162,6 +163,7 @@ function productCard(p) {
     ${fileLine(p)}
     ${p.available ? "" : `<p class="prod-soldout" role="status">${esc(p.message)}</p>`}
     <div class="btn-row">${buyButton(p)}<button class="btn ghost cart-add" data-add="${esc(p.id)}" aria-label="Ajouter ${esc(p.name)} au panier" title="Ajouter au panier"${p.available ? "" : " disabled"}>🛒</button></div>
+    ${isAdmin && p.available ? `<button class="btn ghost admin-dl" data-admin-dl="${esc(p.id)}">⬇ Télécharger (admin · gratuit)</button>` : ""}
     <button class="btn ghost prod-more" data-more="${esc(p.id)}">Voir les détails</button>
   </article>`;
 }
@@ -179,6 +181,7 @@ function renderShop() {
   box.querySelectorAll("[data-buy]").forEach(b => b.onclick = () => initiatePayment(b.dataset.buy, b));
   box.querySelectorAll("[data-add]").forEach(b => b.onclick = () => { const p = productById(b.dataset.add); if (p) { addToCart(p.name); b.textContent = "✓"; setTimeout(() => b.textContent = "🛒", 1000); } });
   box.querySelectorAll("[data-more]").forEach(b => b.onclick = () => openDetails(b.dataset.more));
+  box.querySelectorAll("[data-admin-dl]").forEach(b => b.onclick = () => adminDownload(b.dataset.adminDl));
 }
 function detailSection(title, content, ordered) {
   if (!content || (Array.isArray(content) && !content.length)) return "";
@@ -192,6 +195,7 @@ function openDetails(id) {
   const buy = p.available ? `<button class="btn buy-btn" data-buy="${esc(p.id)}">${label}</button>` : `<button class="btn buy-btn" disabled aria-disabled="true">${p.state === "unknown" ? "Vérification…" : "Indisponible"}</button>`;
   const inner = `
     <div class="pd-head">${artBlock(p, true)}<div><h2>Pack ${esc(p.name)} <span class="prod-ver">v${esc(p.version)}</span></h2><p class="muted">${esc(p.tagline || "")}</p></div></div>
+    ${isAdmin && p.available ? `<p><button class="btn ghost admin-dl" data-admin-dl="${esc(p.id)}">⬇ Télécharger (admin · gratuit)</button></p>` : ""}
     <div class="pd-buy"><div>${now !== base ? `<s class="was">${fmtPrice(base)}</s> ` : ""}<b class="pd-price">${fmtPrice(now)} USDT</b>${promoApplies(p) ? ` <span class="promo-tag">Code ${esc(catalog.myPromo.code)} : -${catalog.myPromo.percent} %</span>` : ""}</div>${buy}</div>
     ${p.available ? "" : `<p class="prod-soldout" role="status">${esc(p.message)}</p>`}
     ${detailSection("Description", p.long_description || p.description)}
@@ -208,6 +212,7 @@ function openDetails(id) {
     <div class="pd-buy pd-buy-bottom"><b class="pd-price">${fmtPrice(now)} USDT</b>${buy}</div>`;
   const m = openModal(inner, "Détails du pack " + p.name);
   m.el.querySelectorAll("[data-buy]").forEach(b => b.onclick = () => { m.close(); initiatePayment(b.dataset.buy, b); });
+  m.el.querySelectorAll("[data-admin-dl]").forEach(b => b.onclick = () => adminDownload(b.dataset.adminDl));
 }
 
 // ---------- Panier (par utilisateur, localStorage) ----------
@@ -297,12 +302,34 @@ async function initiatePayment(productId, btn) {
   } finally { btn.disabled = false; btn.textContent = old; }
 }
 
+function toast(msg, isError) {
+  let t = $("toast");
+  if (!t) { t = document.createElement("div"); t.id = "toast"; t.className = "toast"; t.setAttribute("role", "status"); document.body.appendChild(t); }
+  t.textContent = msg; t.classList.toggle("toast-err", !!isError); t.classList.add("show");
+  clearTimeout(t._h); t._h = setTimeout(() => t.classList.remove("show"), 6000);
+}
+// Le ZIP vient du serveur GOANGEL (jamais d'un lien externe) ; un lien « attachment » lance le téléchargement SANS quitter la page.
+function startDownload(path) {
+  const a = document.createElement("a");
+  a.href = API + path; a.rel = "noopener"; a.download = ""; a.style.display = "none";
+  document.body.appendChild(a); a.click(); setTimeout(() => a.remove(), 1000);
+  toast("⬇ Téléchargement lancé depuis GOANGEL : vérifiez les téléchargements de votre navigateur.");
+}
+
 async function downloadOrder(paymentId) {
   try {
     const r = await api("/api/download-token/" + encodeURIComponent(paymentId), { method: "POST" });
     if (!r.url) throw new Error("Lien indisponible.");
-    window.location.href = API + r.url;   // le serveur envoie le ZIP en flux (lien signé valable 2 min)
-  } catch (e) { alert("Téléchargement impossible : " + e.message); }
+    startDownload(r.url);                  // lien signé valable 2 min, lié à votre commande
+  } catch (e) { toast("Téléchargement impossible : " + e.message, true); }
+}
+
+// Accès gratuit : réservé au compte administrateur (contrôlé par le serveur, aucune commande créée)
+async function adminDownload(productId) {
+  try {
+    const r = await api("/api/admin/download-token", { method: "POST", body: JSON.stringify({ product_id: productId }) });
+    startDownload(r.url);
+  } catch (e) { toast("Téléchargement impossible : " + e.message, true); }
 }
 
 function confirmBox(title, html, okLabel) {
@@ -526,6 +553,7 @@ const start = async () => {
 
   user.getIdTokenResult().then(r => {
     if (r.claims.admin === true) {
+      isAdmin = true; renderShop();
       const a = document.createElement("a");
       a.href = "admin.html"; a.textContent = "Admin"; a.className = "btn small"; a.style.marginLeft = "1rem";
       document.querySelector(".user").prepend(a);

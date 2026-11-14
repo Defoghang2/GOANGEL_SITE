@@ -28,9 +28,9 @@ function showConfirm(title, message) {
 }
 
 // --- API backend (jeton Firebase ; le serveur vérifie le claim admin) ---
-async function adminApi(path, method = "GET") {
+async function adminApi(path, method = "GET", body) {
   const token = await auth.currentUser.getIdToken();
-  const res = await fetch(API + path, { method, headers: { Authorization: "Bearer " + token } });
+  const res = await fetch(API + path, { method, headers: { Authorization: "Bearer " + token, ...(body ? { "Content-Type": "application/json" } : {}) }, body: body ? JSON.stringify(body) : undefined });
   let data = null;
   try { data = await res.json(); } catch (e) {}
   if (!res.ok) throw new Error(data && typeof data.detail === "string" ? data.detail : "Erreur serveur (" + res.status + ")");
@@ -41,6 +41,17 @@ function showDenied() { $("admin-denied").classList.remove("hidden"); $("admin-c
 function showContent() {
   $("admin-content").classList.remove("hidden"); $("admin-denied").classList.add("hidden");
   loadPacks(); loadMedia(); loadTrack(); loadReviews(); loadStock();
+}
+
+// ---------- Téléchargement gratuit (admin) ----------
+async function adminDownload(productId, file) {
+  const st = $("sync-status");
+  try {
+    const r = await adminApi("/api/admin/download-token", "POST", { product_id: productId, ...(file ? { file } : {}) });
+    const a = document.createElement("a"); a.href = API + r.url; a.rel = "noopener"; a.download = ""; a.style.display = "none";
+    document.body.appendChild(a); a.click(); setTimeout(() => a.remove(), 1000);
+    st.textContent = "⬇ Téléchargement lancé : " + (file || productId); st.style.color = "var(--pos)";
+  } catch (e) { st.textContent = "❌ " + e.message; st.style.color = "var(--err)"; }
 }
 
 // ---------- Catalogue & stock ----------
@@ -54,19 +65,23 @@ function renderStock(v) {
     const li = document.createElement("li");
     li.innerHTML = `<div class="item-info"><strong>${esc(p.name)} — v${esc(p.version)} — ${esc(p.price_usdt)} USDT</strong>
       <small>${STATE_LABEL[p.state] || esc(p.state)}${p.recently_updated ? " · 🆕 récemment mis à jour" : ""}${p.file ? " · " + esc(p.file.name) + " (" + (p.file.size / 1048576).toFixed(1) + " Mo)" : ""}${p.archived && p.archived.length ? "<br>Anciennes versions conservées : " + esc(p.archived.join(", ")) : ""}</small></div>`;
+    const acts = document.createElement("div"); acts.className = "item-actions";
+    const names = [p.file ? { f: "", label: "⬇ " + p.file.name } : null, ...(p.archived || []).map(n => ({ f: n, label: "⬇ " + n }))].filter(Boolean);
+    names.forEach(n => { const b = document.createElement("button"); b.className = "btn small ghost"; b.textContent = n.label; b.title = "Téléchargement gratuit (admin)"; b.addEventListener("click", () => adminDownload(p.id, n.f)); acts.appendChild(b); });
+    li.appendChild(acts);
     list.appendChild(li);
   });
   if (!(v.products || []).length) list.innerHTML = '<li class="muted">Aucun produit.</li>';
   $("unlisted-box").textContent = v.unlisted && v.unlisted.length
-    ? "Fichiers présents sur Drive mais absents du catalogue (nom à rapprocher d'un produit) : " + v.unlisted.join(", ") : "";
+    ? "Fichiers présents dans le stockage mais absents du catalogue (nom à rapprocher d'un produit) : " + v.unlisted.join(", ") : "";
   const st = $("sync-status");
   const age = v.checked_age_seconds;
-  if (v.drive === "ok") {
+  if (v.storage === "ok") {
     const fresh = age !== null && age < 30;
-    st.textContent = fresh ? `✅ Synchronisation automatique active : Drive vérifié il y a ${Math.round(age)} s (toutes les ${v.poll_seconds} s)`
-                           : "⚠️ Aucune vérification récente de Drive : le serveur relance la surveillance automatiquement.";
+    st.textContent = fresh ? `✅ Synchronisation automatique active : stockage vérifié il y a ${Math.round(age)} s (toutes les ${v.poll_seconds} s)`
+                           : "⚠️ Aucune vérification récente du stockage : le serveur relance la surveillance automatiquement.";
     st.style.color = fresh ? "var(--pos)" : "var(--gold)";
-  } else { st.textContent = "⚠️ Drive : " + (v.error || v.drive) + " — nouvelle tentative automatique en cours"; st.style.color = "var(--err)"; }
+  } else { st.textContent = "⚠️ Stockage : " + (v.error || v.storage) + " — nouvelle tentative automatique en cours"; st.style.color = "var(--err)"; }
 }
 async function loadStock() { try { renderStock(await adminApi("/api/admin/catalog")); } catch (e) { const st = $("sync-status"); st.textContent = "Serveur indisponible : " + e.message; st.style.color = "var(--err)"; } }
 async function syncNow(quiet) {

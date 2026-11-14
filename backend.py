@@ -74,7 +74,7 @@ def init_firebase():
 db = init_firebase()
 
 # --- GOOGLE DRIVE via rclone (remote « gdrive », dossier goangel_packs) ---
-RCLONE_REMOTE = "gdrive_wadoum:goangel_packs"
+RCLONE_REMOTE = "gdrive:goangel_packs"
 RCLONE_CONF_PATH = None
 
 
@@ -161,7 +161,8 @@ def map_status(raw: str) -> str:
 
 def current_uid(authorization: Optional[str]) -> str:
     if db is None:
-        raise HTTPException(status_code=503, detail="Base de données non configurée côté serveur (secret FIREBASE_CREDENTIALS).")
+        print("❌ FIREBASE_CREDENTIALS absent ou invalide : requêtes clients refusées.")
+        raise HTTPException(status_code=503, detail="Service momentanément indisponible, réessayez dans un instant.")
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Connexion requise.")
     try:
@@ -208,7 +209,7 @@ CATALOG_FILE = os.environ.get("CATALOG_FILE") or os.path.join(os.path.dirname(os
 RECENT_DAYS = 14
 OUT_OF_STOCK_MESSAGE = ("Ce logiciel est actuellement épuisé. Nous préparons l'arrivée de nouvelles marques ou versions. "
                         "Merci de patienter, le produit sera de nouveau disponible dès son réapprovisionnement.")
-UNKNOWN_MESSAGE = "La disponibilité de ce logiciel est en cours de vérification (Google Drive injoignable). Réessayez dans un instant."
+UNKNOWN_MESSAGE = "La disponibilité de ce logiciel est en cours de vérification. Réessayez dans un instant."
 # <id>.zip ou <id>-vX.Y.Z.zip (en minuscules pour la comparaison)
 FILE_NAME_RE = re.compile(r"^(?P<id>[a-z0-9]+(?:-[a-z0-9]+)*?)(?:[-_]v(?P<ver>\d+(?:\.\d+){0,3}))?\.zip$")
 SAFE_FILE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,100}\.zip$")
@@ -482,7 +483,8 @@ def drive_files_or_http() -> dict:
     try:
         return fetch_drive_files()
     except DriveError as e:
-        raise HTTPException(status_code=503 if RCLONE_CONF_PATH is None else 502, detail=str(e))
+        print(f"⚠️ Stockage indisponible : {e}")
+        raise HTTPException(status_code=503 if RCLONE_CONF_PATH is None else 502, detail="Fichiers momentanément indisponibles, réessayez dans un instant.")
 
 
 def _files_of(pid: str, files: dict) -> list:
@@ -806,7 +808,7 @@ def verified_product(product_id: str):
         load_products(True)
     files, err = drive_listing_now()                   # liste fraîche (jamais le cache de la surveillance)
     if files is None:
-        raise HTTPException(status_code=503, detail="Impossible de vérifier la disponibilité du logiciel (Google Drive injoignable). Aucun paiement n'a été créé, réessayez dans un instant.")
+        raise HTTPException(status_code=503, detail="Impossible de vérifier la disponibilité du logiciel pour le moment. Aucun paiement n'a été créé, réessayez dans un instant.")
     snap = rebuild(files, None)
     item = next((i for i in snap["items"] if i["id"] == product_id), None)
     if item is None:
@@ -833,7 +835,7 @@ def admin_claims(authorization: Optional[str]) -> dict:
 def admin_view(snap: dict) -> dict:
     age = round(time.time() - snap["ts"], 1) if snap["ts"] else None
     return {
-        "drive": snap["drive"], "error": snap["error"], "synced_at": snap["synced_at"],
+        "storage": snap["drive"], "error": snap["error"], "synced_at": snap["synced_at"],
         "checked_at": snap["checked_at"], "changed_at": snap["changed_at"], "checked_age_seconds": age,
         "poll_seconds": DRIVE_POLL_SECONDS, "watcher_fails": _watch["fails"], "realtime_products": _listener_ok,
         "promo": active_promo(snap["promo"]), "promo_config": snap["promo"] or {},
@@ -853,7 +855,7 @@ def health_check():
         "status": "ok", "model": MODEL_NAME,
         "firebase": db is not None, "storage": RCLONE_CONF_PATH is not None,
         "nowpayments_key": bool(NOWPAYMENTS_API_KEY),
-        "catalog": {"drive": _snapshot["drive"], "products": len(_snapshot["items"]), "checked_at": _snapshot["checked_at"],
+        "catalog": {"storage": _snapshot["drive"], "products": len(_snapshot["items"]), "checked_at": _snapshot["checked_at"],
                     "poll_seconds": DRIVE_POLL_SECONDS, "watcher_fails": _watch["fails"]},
     }
 
@@ -886,7 +888,7 @@ def create_payment(req: PaymentRequest, authorization: Optional[str] = Header(No
     uid = current_uid(authorization)
     if not NOWPAYMENTS_API_KEY:
         print("❌ CRYPTO_API_KEY manquante (secret GitHub non transmis au backend ?).")
-        raise HTTPException(status_code=503, detail="Paiement crypto non configuré côté serveur (secret CRYPTO_API_KEY).")
+        raise HTTPException(status_code=503, detail="Paiement momentanément indisponible, réessayez plus tard.")
 
     product_id = slug(req.product_id or req.pack_name or "")
     if not product_id:
@@ -953,7 +955,7 @@ def check_payment(payment_id: str, authorization: Optional[str] = Header(None)):
     if order.get("status") == "paid":
         return {"status": "paid"}
     if not NOWPAYMENTS_API_KEY:
-        raise HTTPException(status_code=503, detail="Paiement crypto non configuré côté serveur.")
+        raise HTTPException(status_code=503, detail="Paiement momentanément indisponible, réessayez plus tard.")
     try:
         res = requests.get(f"{NOWPAYMENTS_URL}/payment/{payment_id}", headers={"x-api-key": NOWPAYMENTS_API_KEY}, timeout=30)
         res.raise_for_status()
@@ -1028,7 +1030,7 @@ def run_rclone(args, timeout):
 
 def ensure_drive_ready():
     if RCLONE_CONF_PATH is None:
-        raise HTTPException(status_code=503, detail="Stockage Google Drive non configuré côté serveur (secret RCLONE_CONFIG).")
+        raise HTTPException(status_code=503, detail="Téléchargement momentanément indisponible, réessayez dans un instant.")
 
 
 def make_dl_token(payment_id: str, uid: str) -> str:
@@ -1052,7 +1054,8 @@ def authorize_download(payment_id: str, token: Optional[str], authorization: Opt
     """Commande existante + payée + propriétaire (jeton Firebase OU lien signé court)."""
     check_payment_id(payment_id)
     if db is None:
-        raise HTTPException(status_code=503, detail="Base de données non configurée côté serveur (secret FIREBASE_CREDENTIALS).")
+        print("❌ FIREBASE_CREDENTIALS absent ou invalide : téléchargements refusés.")
+        raise HTTPException(status_code=503, detail="Service momentanément indisponible, réessayez dans un instant.")
     if token:
         snap = db.collection("orders").document(payment_id).get()
         order = snap.to_dict() if snap.exists else None
@@ -1096,7 +1099,7 @@ def order_file_name(order: dict) -> str:
     return name
 
 
-MISSING_FILE_MESSAGE = ("Le fichier de ce logiciel n'est plus disponible sur le stockage pour le moment. Votre commande est conservée : "
+MISSING_FILE_MESSAGE = ("Le fichier de ce logiciel n'est plus disponible pour le moment. Votre commande est conservée : "
                         "contactez le support avec votre ID de paiement.")
 
 
@@ -1111,12 +1114,10 @@ def download_token(payment_id: str, authorization: Optional[str] = Header(None))
     return {"url": f"/api/download/{payment_id}?token={make_dl_token(payment_id, str(order.get('uid', '')))}"}
 
 
-@app.get("/api/download/{payment_id}")
-def download_file(payment_id: str, token: Optional[str] = Query(None, max_length=200), authorization: Optional[str] = Header(None)):
-    order = authorize_download(payment_id, token, authorization)
+def _serve_file(filename: str) -> FileResponse:
+    """Récupère le ZIP depuis le stockage privé vers un dossier temporaire du serveur puis l'envoie en flux au navigateur.
+    Le client ne reçoit jamais de lien, d'identifiant ni de chemin du stockage ; le dossier temporaire est supprimé après l'envoi."""
     ensure_drive_ready()
-    filename = order_file_name(order)
-
     folder = _reserve_slot()
     if folder is None:
         raise HTTPException(status_code=429, detail="Serveur occupé par d'autres téléchargements, réessayez dans un instant.")
@@ -1128,17 +1129,91 @@ def download_file(payment_id: str, token: Optional[str] = Query(None, max_length
         try:
             res = run_rclone(["copyto", f"{RCLONE_REMOTE}/{info['name']}", dest], timeout=900)
         except subprocess.TimeoutExpired:
-            raise HTTPException(status_code=504, detail="Téléchargement depuis Google Drive trop long, réessayez.")
+            raise HTTPException(status_code=504, detail="Le téléchargement a pris trop de temps, réessayez.")
         if res.returncode != 0 or not os.path.isfile(dest):
             print(f"❌ rclone copyto : {res.stderr[:200]}")
-            raise HTTPException(status_code=502, detail="Impossible de récupérer le fichier depuis Google Drive.")
+            raise HTTPException(status_code=502, detail="Fichier momentanément indisponible, réessayez dans un instant.")
     except BaseException:
         _release_slot(folder)
         raise
     return FileResponse(
         dest, media_type="application/zip", filename=f"goangel-{info['name']}",
+        headers={"Cache-Control": "no-store"},
         background=BackgroundTask(_release_slot, folder),   # supprime le fichier temporaire après l'envoi
     )
+
+
+@app.get("/api/download/{payment_id}")
+def download_file(payment_id: str, token: Optional[str] = Query(None, max_length=200), authorization: Optional[str] = Header(None)):
+    order = authorize_download(payment_id, token, authorization)
+    return _serve_file(order_file_name(order))
+
+
+# ---------- Accès GRATUIT réservé au compte administrateur ----------
+class AdminDownloadRequest(BaseModel):
+    product_id: str = Field(..., max_length=60)
+    file: Optional[str] = Field(None, max_length=120)
+
+
+def make_admin_token(product_id: str, file_name: str, uid: str) -> str:
+    payload = base64.urlsafe_b64encode(json.dumps({"p": product_id, "f": file_name, "u": uid, "e": int(time.time()) + DL_TTL}).encode()).decode()
+    sig = hmac.new(DL_SECRET, ("admin." + payload).encode(), hashlib.sha256).hexdigest()
+    return f"{payload}.{sig}"
+
+
+def read_admin_token(token: str, product_id: str) -> Optional[dict]:
+    try:
+        payload, sig = token.rsplit(".", 1)
+        expected = hmac.new(DL_SECRET, ("admin." + payload).encode(), hashlib.sha256).hexdigest()
+        if not hmac.compare_digest(sig, expected):
+            return None
+        data = json.loads(base64.urlsafe_b64decode(payload.encode()))
+        if data["e"] < time.time() or data["p"] != product_id:
+            return None
+        return data
+    except Exception:
+        return None
+
+
+@app.post("/api/admin/download-token")
+def admin_download_token(req: AdminDownloadRequest, authorization: Optional[str] = Header(None)):
+    """Téléchargement gratuit de TOUS les packs pour l'admin. Le serveur exige le claim « admin » (posé par create-admin.js,
+    impossible à obtenir pour un client) ; aucune commande ni paiement n'est créé."""
+    claims = admin_claims(authorization)
+    pid = slug(req.product_id)
+    if not pid:
+        raise HTTPException(status_code=400, detail="Produit manquant.")
+    ensure_drive_ready()
+    files = drive_files_or_http()
+    if req.file:
+        name = req.file.strip()
+        m = FILE_NAME_RE.match(name.lower())
+        info = files.get(name.lower())
+        if not SAFE_FILE_NAME.match(name) or ".." in name or not m or m.group("id") != pid or not info:
+            raise HTTPException(status_code=404, detail="Fichier introuvable pour ce produit.")
+        name = info["name"]
+    else:
+        if _products is None:
+            load_products(True)
+        item = next((i for i in rebuild(files, None)["items"] if i["id"] == pid), None)
+        if item is None:
+            raise HTTPException(status_code=404, detail="Pack inconnu.")
+        if not item["file"]:
+            raise HTTPException(status_code=404, detail="Aucun fichier disponible pour ce pack.")
+        name = item["file"]["name"]
+    print(f"🔑 Accès admin gratuit : {pid} / {name} (compte {claims.get('uid', '?')})")
+    return {"url": f"/api/admin/download/{pid}?token={make_admin_token(pid, name, claims.get('uid', ''))}"}
+
+
+@app.get("/api/admin/download/{product_id}")
+def admin_download_file(product_id: str, token: str = Query(..., max_length=600)):
+    data = read_admin_token(token, slug(product_id))
+    if data is None:
+        raise HTTPException(status_code=403, detail="Lien expiré ou invalide.")
+    name = str(data["f"])
+    if not SAFE_FILE_NAME.match(name) or ".." in name:
+        raise HTTPException(status_code=400, detail="Nom de fichier invalide.")
+    return _serve_file(name)
 
 
 # ---------- Catalogue public (connecté) et administration ----------
@@ -1152,7 +1227,7 @@ def catalog(http: Request, authorization: Optional[str] = Header(None)):
     promo = active_promo(snap["promo"])
     public = {k: promo[k] for k in ("code", "percent", "pack_id", "message", "expires")} if promo and promo["banner"] else None
     return {"products": [public_item(i) for i in snap["items"]], "promo": public, "my_promo": my_promo_for(uid, promo),
-            "drive": snap["drive"], "synced_at": snap["synced_at"], "checked_at": snap["checked_at"],
+            "storage": snap["drive"], "synced_at": snap["synced_at"], "checked_at": snap["checked_at"],
             "version": snap["version"], "refresh_seconds": DRIVE_POLL_SECONDS}
 
 
@@ -1186,7 +1261,7 @@ def catalog_version(http: Request, authorization: Optional[str] = Header(None)):
     if rate_limited("ver:" + ip, limit=120):
         raise HTTPException(status_code=429, detail="Trop de requêtes, patientez un instant.")
     snap = get_snapshot()
-    return {"version": snap["version"], "checked_at": snap["checked_at"], "drive": snap["drive"]}
+    return {"version": snap["version"], "checked_at": snap["checked_at"], "storage": snap["drive"]}
 
 
 @app.get("/api/admin/catalog")
