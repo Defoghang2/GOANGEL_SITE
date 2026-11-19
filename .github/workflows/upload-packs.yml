@@ -55,8 +55,8 @@ jobs:
           except Exception:
               print("::error::RCLONE_CONFIG n'est pas un Base64 valide.")
               sys.exit(1)
-          if "[gdrive]" not in text:
-              print("::error::La configuration rclone ne contient pas de remote nommé [gdrive].")
+          if "[gdrive_wadoum]" not in text:
+              print("::error::La configuration rclone ne contient pas de remote nommé [gdrive_wadoum].")
               sys.exit(1)
           path = os.path.expanduser("~/.config/rclone/rclone.conf")
           fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)

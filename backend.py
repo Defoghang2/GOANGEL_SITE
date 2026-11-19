@@ -88,8 +88,8 @@ def init_rclone():
         return None
     try:
         conf = _decode_secret(raw).decode("utf-8")
-        if "[gdrive]" not in conf:
-            print("❌ RCLONE_CONFIG : section [gdrive] absente.")
+        if "[gdrive_wadoum]" not in conf:
+            print("❌ RCLONE_CONFIG : section [gdrive_wadoum] absente.")
             return None
         folder = tempfile.mkdtemp(prefix="goangel_rclone_")
         path = os.path.join(folder, "rclone.conf")
