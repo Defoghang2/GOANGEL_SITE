@@ -8,16 +8,16 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/Defoghang1/GOANGEL_SITE.git"
+    "url": "git+https://github.com/Defoghang2/GOANGEL_SITE.git"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "type": "commonjs",
   "bugs": {
-    "url": "https://github.com/Defoghang1/GOANGEL_SITE/issues"
+    "url": "https://github.com/Defoghang2/GOANGEL_SITE/issues"
   },
-  "homepage": "https://github.com/Defoghang1/GOANGEL_SITE#readme",
+  "homepage": "https://github.com/Defoghang2/GOANGEL_SITE#readme",
   "dependencies": {
     "firebase-admin": "^14.5.0"
   }
