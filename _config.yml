@@ -1,0 +1,16 @@
+# GitHub Pages (Jekyll) : ces fichiers restent dans le dépôt (le backend les lit) mais ne sont PAS publiés sur le site.
+# Les dossiers/fichiers commençant par « . » ou « _ » sont déjà exclus automatiquement (.github, _config.yml...).
+exclude:
+  - backend.py
+  - requirements.txt
+  - catalog.json
+  - packs
+  - tools
+  - README.md
+  - package.json
+  - package-lock.json
+  - deploy.sh
+  - firestore.rules
+  - storage.rules
+  - serviceAccountKey.json
+  - node_modules

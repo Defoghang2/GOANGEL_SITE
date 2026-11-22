@@ -1,0 +1,43 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isAdmin() {
+      return request.auth != null && request.auth.token.admin == true;
+    }
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    match /users/{userId} {
+      allow read, write: if isSignedIn() && request.auth.uid == userId;
+    }
+    match /packs/{packId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+    match /media/{mediaId} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+    // Preuve sociale et transparence : lecture pour les connectés, écriture réservée à l'admin
+    match /track_record/{id} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+    match /testimonials/{id} {
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
+    }
+    // Offre promotionnelle : modifiable uniquement par l'admin (lue par le backend)
+    match /settings/{id} {
+      allow read, write: if isAdmin();
+    }
+    // Réductions appliquées par compte : écrites uniquement par le backend
+    match /promo_redemptions/{uid} {
+      allow read, write: if false;
+    }
+    // Commandes : écrites uniquement par le backend (Admin SDK ignore ces règles)
+    match /orders/{orderId} {
+      allow read, write: if false;
+    }
+  }
+}
